@@ -1,0 +1,39 @@
+# VPS DDoS Protection Configuration
+# https://github.com/wobujidao/vps-ddos-protection
+
+# === SERVER INFORMATION ===
+SERVER_NAME="$(hostname)"
+
+# === PROTECTION SETTINGS ===
+# Rate limits (packets per second)
+TS_RATE_LIMIT=50        # TeamSpeak rate limit
+WG_RATE_LIMIT=200       # WireGuard rate limit
+
+# Block duration in seconds (1800 = 30 minutes)
+BLOCK_TIME=1800
+
+# Alert threshold (send notification after N blocked packets)
+ALERT_THRESHOLD=100
+
+# Cooldown between alerts (seconds)
+ALERT_COOLDOWN=300
+
+# === TELEGRAM NOTIFICATIONS ===
+# Enable Telegram notifications (true/false)
+ENABLE_TELEGRAM=false
+
+# Telegram Bot Token (get from @BotFather)
+# Example: "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
+TELEGRAM_BOT_TOKEN=""
+
+# Telegram Chat ID (your chat or group ID)
+# Example: "-1001234567890" for groups or "123456789" for private
+TELEGRAM_CHAT_ID=""
+
+# === ADVANCED SETTINGS ===
+# Enable GeoIP lookups (true/false)
+ENABLE_GEO=true
+
+# Log file paths
+LOG_FILE="/var/log/vps-protection.log"
+ATTACK_LOG="/var/log/vps-attacks.json"

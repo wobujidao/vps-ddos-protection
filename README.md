@@ -15,6 +15,20 @@
 
 </div>
 
+---
+
+## 🆕 What's New in v1.2.0
+
+- ✅ **Dependency validation** - Automatic checks for required packages on startup
+- ⚡ **GeoIP caching** - Faster lookups with 1-hour cache (reduces API calls by 90%+)
+- 🔄 **Rate limiting** - Protection against ipinfo.io API throttling during mass attacks
+- 🖥️ **Smart WireGuard detection** - Supports both native and Docker installations
+- ⏱️ **Configurable timeouts** - Better startup reliability on slow networks
+
+[View Full Changelog →](CHANGELOG.md)
+
+---
+
 ## 🎯 Why VPS DDoS Protection?
 
 Modern VPS servers face constant threats from DDoS attacks, especially on UDP services like VPN and game servers. This solution provides enterprise-grade protection without expensive hardware.
@@ -195,6 +209,8 @@ Edit `/etc/vps-protection/config`:
 | `TELEGRAM_BOT_TOKEN` | "" | Your Telegram bot token |
 | `TELEGRAM_CHAT_ID` | "" | Your Telegram chat ID |
 | `ENABLE_GEO` | true | Enable GeoIP lookups |
+| `NETWORK_TIMEOUT` | 60 | Network wait timeout (v1.2.0+) |
+| `GEO_CACHE_TTL` | 3600 | GeoIP cache duration (v1.2.0+) |
 
 ## 🔌 Protected Services
 
@@ -343,6 +359,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Issues**: [GitHub Issues](https://github.com/wobujidao/vps-ddos-protection/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/wobujidao/vps-ddos-protection/discussions)
 - **Wiki**: [GitHub Wiki](https://github.com/wobujidao/vps-ddos-protection/wiki)
+- **Email**: demidov_vlad@mail.ru
 
 ## ⭐ Star History
 

@@ -1,0 +1,31 @@
+#!/bin/bash
+clear
+echo "╔══════════════════════════════════════════════════════╗"
+echo "║          DDoS Protection Status Monitor              ║"
+echo "╚══════════════════════════════════════════════════════╝"
+echo ""
+echo "🛡️  Service: $(systemctl is-active vps-protection)"
+echo "⏱️  Uptime: $(ps -o etime= -p $(cat /var/run/vps-protection-monitor.pid 2>/dev/null) 2>/dev/null || echo 'N/A')"
+echo ""
+echo "📊 Blocked Packets:"
+WG_BLOCKED=$(sudo iptables -L INPUT -n -v -x 2>/dev/null | grep "DROP.*51820" | head -1 | awk '{print $1}')
+TS_BLOCKED=$(sudo iptables -L INPUT -n -v -x 2>/dev/null | grep "DROP.*9987" | head -1 | awk '{print $1}')
+printf "   WireGuard: %'d packets\n" $WG_BLOCKED 2>/dev/null || echo "   WireGuard: $WG_BLOCKED packets"
+printf "   TeamSpeak: %'d packets\n" $TS_BLOCKED 2>/dev/null || echo "   TeamSpeak: $TS_BLOCKED packets"
+echo ""
+echo "🚫 Blacklisted:"
+echo "   IPv4: $(sudo ipset list blacklist4 2>/dev/null | grep -c timeout) IPs"
+echo "   IPv6: $(sudo ipset list blacklist6 2>/dev/null | grep -c timeout) IPs"
+echo ""
+echo "👥 Active Connections:"
+echo "   WireGuard: $(docker exec wg-easy wg show 2>/dev/null | grep "latest handshake" | wc -l) clients"
+echo "   TeamSpeak: $(ps aux | grep ts3server | grep -v grep | wc -l) server running"
+echo ""
+echo "⚙️  Protection Settings:"
+source /etc/vps-protection/config 2>/dev/null
+echo "   WireGuard: $WG_RATE_LIMIT packets/sec"
+echo "   TeamSpeak: $TS_RATE_LIMIT packets/sec"
+echo "   Alert threshold: $ALERT_THRESHOLD packets"
+echo "   Block duration: $((BLOCK_TIME/60)) minutes"
+echo ""
+echo "═══════════════════════════════════════════════════════"

@@ -1,0 +1,19 @@
+[Unit]
+Description=VPS DDoS Protection
+After=network-online.target docker.service crowdsec.service
+Wants=network-online.target
+Requires=network-online.target
+
+[Service]
+Type=forking
+# Задержка перед запуском (30 секунд после загрузки)
+ExecStartPre=/bin/sleep 30
+ExecStart=/usr/local/bin/vps-protection.sh start
+ExecStop=/usr/local/bin/vps-protection.sh stop
+ExecReload=/usr/local/bin/vps-protection.sh restart
+PIDFile=/var/run/vps-protection-monitor.pid
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

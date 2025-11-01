@@ -507,7 +507,7 @@ sudo nano /etc/vps-protection/config
 - **Проблемы**: [GitHub Issues](https://github.com/wobujidao/vps-ddos-protection/issues)
 - **Обсуждения**: [GitHub Discussions](https://github.com/wobujidao/vps-ddos-protection/discussions)
 - **Wiki**: [GitHub Wiki](https://github.com/wobujidao/vps-ddos-protection/wiki)
-- **Telegram**: [@vps_ddos_protection](https://t.me/vps_ddos_protection)
+- **Email**: demidov_vlad@mail.ru
 
 ## ⭐ История звёзд
 

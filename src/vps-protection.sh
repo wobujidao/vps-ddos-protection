@@ -1,10 +1,17 @@
 #!/bin/bash
 
+# VPS DDoS Protection Script
+# Version: 1.1.0
+# https://github.com/wobujidao/vps-ddos-protection
+
 # Пути к файлам
 CONFIG_FILE="/etc/vps-protection/config"
 LOG_FILE="/var/log/vps-protection.log"
 ATTACK_LOG="/var/log/vps-attacks.json"
 PID_FILE="/var/run/vps-protection-monitor.pid"
+
+# Максимальный размер лога (10MB)
+MAX_LOG_SIZE=10485760
 
 # Проверка конфига
 if [[ ! -f "$CONFIG_FILE" ]]; then
@@ -12,23 +19,88 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
     exit 1
 fi
 
+# Проверка прав доступа к конфигу
+CONFIG_PERMS=$(stat -c %a "$CONFIG_FILE")
+if [[ "$CONFIG_PERMS" != "600" ]]; then
+    echo "WARNING: Config file permissions are not secure!"
+    echo "Fixing permissions..."
+    chmod 600 "$CONFIG_FILE"
+fi
+
 # Загружаем конфигурацию
 source "$CONFIG_FILE"
+
+# Функция ротации логов
+rotate_logs() {
+    if [[ -f "$LOG_FILE" ]] && [[ $(stat -c%s "$LOG_FILE") -gt $MAX_LOG_SIZE ]]; then
+        mv "$LOG_FILE" "$LOG_FILE.old"
+        touch "$LOG_FILE"
+        chmod 644 "$LOG_FILE"
+        echo "[$(date)] Log rotated" >> "$LOG_FILE"
+    fi
+    
+    if [[ -f "$ATTACK_LOG" ]] && [[ $(stat -c%s "$ATTACK_LOG") -gt $MAX_LOG_SIZE ]]; then
+        mv "$ATTACK_LOG" "$ATTACK_LOG.old"
+        touch "$ATTACK_LOG"
+        chmod 644 "$ATTACK_LOG"
+    fi
+}
 
 # Функция отправки в Telegram
 send_telegram() {
     local message="$1"
-    curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-        -d "chat_id=${TELEGRAM_CHAT_ID}" \
-        -d "text=${message}" \
-        -d "parse_mode=HTML" > /dev/null 2>&1
+    if [[ "$ENABLE_TELEGRAM" == "true" ]] && [[ -n "$TELEGRAM_BOT_TOKEN" ]] && [[ -n "$TELEGRAM_CHAT_ID" ]]; then
+        curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            -d "text=${message}" \
+            -d "parse_mode=HTML" \
+            --connect-timeout 5 \
+            --max-time 10 > /dev/null 2>&1
+    fi
 }
 
-# Функция получения информации об IP
+# Функция получения информации об IP с таймаутом
 get_ip_info() {
     local ip="$1"
-    local info=$(curl -s "http://ipinfo.io/${ip}/json" 2>/dev/null)
-    echo "$info"
+    local info=$(curl -s "http://ipinfo.io/${ip}/json" --connect-timeout 3 --max-time 5 2>/dev/null)
+    if [[ -z "$info" ]]; then
+        echo '{"country":"Unknown","org":"Unknown"}'
+    else
+        echo "$info"
+    fi
+}
+
+# Функция создания белого списка
+setup_whitelist() {
+    # Создаём ipset для белого списка если не существует
+    if ! ipset list whitelist4 &>/dev/null; then
+        ipset create whitelist4 hash:ip family inet 2>/dev/null
+    fi
+    if ! ipset list whitelist6 &>/dev/null; then
+        ipset create whitelist6 hash:ip family inet6 2>/dev/null
+    fi
+    
+    # Добавляем IP из конфига
+    if [[ -n "$WHITELIST_IPS" ]]; then
+        for ip in $WHITELIST_IPS; do
+            if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                ipset add whitelist4 "$ip" 2>/dev/null
+                echo "[$(date)] Added $ip to IPv4 whitelist" >> "$LOG_FILE"
+            elif [[ "$ip" =~ ^[a-fA-F0-9:]+$ ]]; then
+                ipset add whitelist6 "$ip" 2>/dev/null
+                echo "[$(date)] Added $ip to IPv6 whitelist" >> "$LOG_FILE"
+            fi
+        done
+    fi
+}
+
+# Функция проверки ipset
+check_ipset() {
+    if ! command -v ipset &>/dev/null; then
+        echo "[$(date)] ERROR: ipset not installed!" >> "$LOG_FILE"
+        return 1
+    fi
+    return 0
 }
 
 # Функция анализа атакующих
@@ -36,7 +108,7 @@ analyze_attackers() {
     local service="$1"
     local port="$2"
     
-    local attackers=$(netstat -nu | grep ":${port}" | awk '{print $5}' | cut -d: -f1 | sort | uniq -c | sort -rn | head -5)
+    local attackers=$(netstat -nu 2>/dev/null | grep ":${port}" | awk '{print $5}' | cut -d: -f1 | sort | uniq -c | sort -rn | head -5)
     local report="<b>🎯 Топ атакующих на ${service}:</b>%0A%0A"
     
     while IFS= read -r line; do
@@ -66,56 +138,63 @@ analyze_attackers() {
 
 # Функция старта защиты
 start_protection() {
-    echo "[$(date)] Starting protection..." >> $LOG_FILE
+    echo "[$(date)] Starting protection..." >> "$LOG_FILE"
+    
+    # Проверяем ipset
+    if ! check_ipset; then
+        echo "ERROR: ipset is required but not installed"
+        exit 1
+    fi
+    
+    # Ротация логов при старте
+    rotate_logs
     
     # Ждём доступности сети
     local network_attempts=0
     while ! ping -c 1 -W 1 8.8.8.8 > /dev/null 2>&1; do
-        echo "[$(date)] Waiting for network..." >> $LOG_FILE
+        echo "[$(date)] Waiting for network..." >> "$LOG_FILE"
         sleep 5
         network_attempts=$((network_attempts + 1))
-        if [[ $network_attempts -gt 12 ]]; then  # Максимум ждём 60 секунд
-            echo "[$(date)] Network timeout, continuing anyway..." >> $LOG_FILE
+        if [[ $network_attempts -gt 12 ]]; then
+            echo "[$(date)] Network timeout, continuing anyway..." >> "$LOG_FILE"
             break
         fi
     done
     
-    # Проверяем доступность Telegram API
-    local telegram_attempts=0
-    while ! curl -s --connect-timeout 5 "https://api.telegram.org" > /dev/null 2>&1; do
-        echo "[$(date)] Waiting for Telegram API..." >> $LOG_FILE
-        sleep 5
-        telegram_attempts=$((telegram_attempts + 1))
-        if [[ $telegram_attempts -gt 6 ]]; then  # Максимум ждём 30 секунд
-            echo "[$(date)] Telegram API timeout, continuing without notifications..." >> $LOG_FILE
-            break
-        fi
-    done
-    
-    # Создаём ipset
+    # Создаём ipset для чёрных списков
     ipset create -exist blacklist4 hash:ip family inet timeout $BLOCK_TIME 2>/dev/null
     ipset create -exist blacklist6 hash:ip family inet6 timeout $BLOCK_TIME 2>/dev/null
     
+    # Настраиваем белый список
+    setup_whitelist
+    
     # IPv4 правила для TeamSpeak
+    # Сначала проверяем белый список
+    iptables -I INPUT -p udp --dport 9987 -m set --match-set whitelist4 src -j ACCEPT 2>/dev/null
+    # Затем чёрный список
     iptables -I INPUT -p udp --dport 9987 -m set --match-set blacklist4 src -j DROP 2>/dev/null
+    # Rate limiting
     iptables -I INPUT -p udp --dport 9987 -m recent --name ts3 --set 2>/dev/null
     iptables -I INPUT -p udp --dport 9987 -m recent --name ts3 --update --seconds 1 --hitcount $TS_RATE_LIMIT -j DROP 2>/dev/null
     
     # IPv4 правила для WireGuard
+    iptables -I INPUT -p udp --dport 51820 -m set --match-set whitelist4 src -j ACCEPT 2>/dev/null
     iptables -I INPUT -p udp --dport 51820 -m set --match-set blacklist4 src -j DROP 2>/dev/null
     iptables -I INPUT -p udp --dport 51820 -m recent --name wg --set 2>/dev/null
     iptables -I INPUT -p udp --dport 51820 -m recent --name wg --update --seconds 1 --hitcount $WG_RATE_LIMIT -j DROP 2>/dev/null
     
-    # IPv6 правила
+    # IPv6 правила (аналогично)
+    ip6tables -I INPUT -p udp --dport 9987 -m set --match-set whitelist6 src -j ACCEPT 2>/dev/null
     ip6tables -I INPUT -p udp --dport 9987 -m set --match-set blacklist6 src -j DROP 2>/dev/null
     ip6tables -I INPUT -p udp --dport 9987 -m recent --name ts3v6 --set 2>/dev/null
     ip6tables -I INPUT -p udp --dport 9987 -m recent --name ts3v6 --update --seconds 1 --hitcount $TS_RATE_LIMIT -j DROP 2>/dev/null
     
+    ip6tables -I INPUT -p udp --dport 51820 -m set --match-set whitelist6 src -j ACCEPT 2>/dev/null
     ip6tables -I INPUT -p udp --dport 51820 -m set --match-set blacklist6 src -j DROP 2>/dev/null
     ip6tables -I INPUT -p udp --dport 51820 -m recent --name wgv6 --set 2>/dev/null
     ip6tables -I INPUT -p udp --dport 51820 -m recent --name wgv6 --update --seconds 1 --hitcount $WG_RATE_LIMIT -j DROP 2>/dev/null
     
-    echo "[$(date)] Protection rules applied" >> $LOG_FILE
+    echo "[$(date)] Protection rules applied" >> "$LOG_FILE"
     
     # Отправляем уведомление
     send_telegram "✅ <b>DDoS защита активирована</b>
@@ -129,49 +208,71 @@ start_protection() {
     monitor_attacks &
     echo $! > $PID_FILE
     
-    echo "[$(date)] Protection started successfully" >> $LOG_FILE
+    echo "[$(date)] Protection started successfully" >> "$LOG_FILE"
 }
 
 # Функция остановки защиты
 stop_protection() {
-    echo "[$(date)] Stopping protection..." >> $LOG_FILE
+    echo "[$(date)] Stopping protection..." >> "$LOG_FILE"
     
     if [ -f $PID_FILE ]; then
         kill $(cat $PID_FILE) 2>/dev/null
         rm $PID_FILE
     fi
     
-    # Удаляем IPv4 правила
+    # Удаляем IPv4 правила для TeamSpeak
     iptables -D INPUT -p udp --dport 9987 -m recent --name ts3 --update --seconds 1 --hitcount $TS_RATE_LIMIT -j DROP 2>/dev/null
     iptables -D INPUT -p udp --dport 9987 -m recent --name ts3 --set 2>/dev/null
     iptables -D INPUT -p udp --dport 9987 -m set --match-set blacklist4 src -j DROP 2>/dev/null
+    iptables -D INPUT -p udp --dport 9987 -m set --match-set whitelist4 src -j ACCEPT 2>/dev/null
     
+    # Удаляем IPv4 правила для WireGuard
     iptables -D INPUT -p udp --dport 51820 -m recent --name wg --update --seconds 1 --hitcount $WG_RATE_LIMIT -j DROP 2>/dev/null
     iptables -D INPUT -p udp --dport 51820 -m recent --name wg --set 2>/dev/null
     iptables -D INPUT -p udp --dport 51820 -m set --match-set blacklist4 src -j DROP 2>/dev/null
+    iptables -D INPUT -p udp --dport 51820 -m set --match-set whitelist4 src -j ACCEPT 2>/dev/null
     
-    # Удаляем IPv6 правила
+    # Удаляем IPv6 правила (аналогично)
     ip6tables -D INPUT -p udp --dport 9987 -m recent --name ts3v6 --update --seconds 1 --hitcount $TS_RATE_LIMIT -j DROP 2>/dev/null
     ip6tables -D INPUT -p udp --dport 9987 -m recent --name ts3v6 --set 2>/dev/null
     ip6tables -D INPUT -p udp --dport 9987 -m set --match-set blacklist6 src -j DROP 2>/dev/null
+    ip6tables -D INPUT -p udp --dport 9987 -m set --match-set whitelist6 src -j ACCEPT 2>/dev/null
     
     ip6tables -D INPUT -p udp --dport 51820 -m recent --name wgv6 --update --seconds 1 --hitcount $WG_RATE_LIMIT -j DROP 2>/dev/null
     ip6tables -D INPUT -p udp --dport 51820 -m recent --name wgv6 --set 2>/dev/null
     ip6tables -D INPUT -p udp --dport 51820 -m set --match-set blacklist6 src -j DROP 2>/dev/null
+    ip6tables -D INPUT -p udp --dport 51820 -m set --match-set whitelist6 src -j ACCEPT 2>/dev/null
     
+    # Удаляем ipset
     ipset destroy blacklist4 2>/dev/null
     ipset destroy blacklist6 2>/dev/null
+    ipset destroy whitelist4 2>/dev/null
+    ipset destroy whitelist6 2>/dev/null
     
-    echo "[$(date)] Protection stopped" >> $LOG_FILE
+    echo "[$(date)] Protection stopped" >> "$LOG_FILE"
     send_telegram "⚠️ DDoS защита отключена на $SERVER_NAME"
 }
 
 # Функция мониторинга
 monitor_attacks() {
     local last_alert=0
+    local log_rotate_check=0
     
     while true; do
         sleep 30
+        
+        # Проверяем существование ipset
+        if ! ipset list blacklist4 &>/dev/null; then
+            echo "[$(date)] ERROR: blacklist4 ipset not found!" >> "$LOG_FILE"
+            continue
+        fi
+        
+        # Ротация логов каждые 30 минут
+        log_rotate_check=$((log_rotate_check + 1))
+        if [[ $log_rotate_check -ge 60 ]]; then
+            rotate_logs
+            log_rotate_check=0
+        fi
         
         # Подсчитываем заблокированные пакеты
         TS_BLOCKED=$(iptables -L INPUT -n -v 2>/dev/null | grep "dpt:9987.*DROP" | awk '{s+=$1} END {print s+0}')
@@ -207,7 +308,7 @@ monitor_attacks() {
                 
                 send_telegram "$message"
                 
-                echo "[$(date)] Attack detected! Target: $main_target, TS:$TS_BLOCKED WG:$WG_BLOCKED" >> $LOG_FILE
+                echo "[$(date)] Attack detected! Target: $main_target, TS:$TS_BLOCKED WG:$WG_BLOCKED" >> "$LOG_FILE"
                 last_alert=$current_time
             fi
         fi
@@ -232,12 +333,33 @@ case "$1" in
             echo "Protection running (PID: $(cat $PID_FILE))"
             echo "TeamSpeak limit: $TS_RATE_LIMIT packets/sec"
             echo "WireGuard limit: $WG_RATE_LIMIT packets/sec"
+            echo "Whitelist IPs: ${WHITELIST_IPS:-none}"
         else
             echo "Protection not running"
         fi
         ;;
+    whitelist-add)
+        if [[ -n "$2" ]]; then
+            ipset add whitelist4 "$2" 2>/dev/null && echo "Added $2 to whitelist"
+        else
+            echo "Usage: $0 whitelist-add IP_ADDRESS"
+        fi
+        ;;
+    whitelist-remove)
+        if [[ -n "$2" ]]; then
+            ipset del whitelist4 "$2" 2>/dev/null && echo "Removed $2 from whitelist"
+        else
+            echo "Usage: $0 whitelist-remove IP_ADDRESS"
+        fi
+        ;;
+    whitelist-list)
+        echo "IPv4 Whitelist:"
+        ipset list whitelist4 2>/dev/null | grep -E "^[0-9]"
+        echo "IPv6 Whitelist:"
+        ipset list whitelist6 2>/dev/null | grep -E "^[a-f0-9:]"
+        ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status}"
+        echo "Usage: $0 {start|stop|restart|status|whitelist-add|whitelist-remove|whitelist-list}"
         exit 1
         ;;
 esac

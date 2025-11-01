@@ -1,23 +1,39 @@
-# Конфигурация VPS Protection
-# ВАЖНО: chmod 600 /etc/vps-protection/config
+# VPS DDoS Protection Configuration
+# IMPORTANT: Set proper permissions after editing
+# chmod 600 /etc/vps-protection/config
 
-# Telegram настройки
-TELEGRAM_BOT_TOKEN="1234567890:sdfkjghsdkjfghsdkjfghdsfkjhg"
-TELEGRAM_CHAT_ID="-1234567890"
-SERVER_NAME="vps.myvps.com"
+# === SERVER INFORMATION ===
+SERVER_NAME="your-server-name"
 
-# Пороги защиты (пакетов в секунду)
-TS_RATE_LIMIT=50
-WG_RATE_LIMIT=200
+# === PROTECTION SETTINGS ===
+# Rate limits (packets per second)
+TS_RATE_LIMIT=50        # TeamSpeak rate limit
+WG_RATE_LIMIT=200       # WireGuard rate limit
 
-# Время блокировки в секундах (30 минут)
+# Block duration in seconds (1800 = 30 minutes)
 BLOCK_TIME=1800
 
-# Порог для алерта (пакетов)
+# Alert threshold (send notification after N blocked packets)
 ALERT_THRESHOLD=100
 
-# Интервал между алертами (секунд)
+# Cooldown between alerts (seconds)
 ALERT_COOLDOWN=300
 
-# Включить гео-локацию IP
+# === TELEGRAM NOTIFICATIONS ===
+# Enable Telegram notifications (true/false)
+ENABLE_TELEGRAM=false
+
+# Get token from @BotFather
+TELEGRAM_BOT_TOKEN="YOUR_BOT_TOKEN_HERE"
+
+# Get chat ID (can be personal or group)
+TELEGRAM_CHAT_ID="YOUR_CHAT_ID_HERE"
+
+# === ADVANCED SETTINGS ===
+# Enable GeoIP lookups (true/false)
 ENABLE_GEO=true
+
+# Whitelist IPs (space-separated)
+WHITELIST_IPS=""
+
+# Example: WHITELIST_IPS="192.168.1.100 10.0.0.1"

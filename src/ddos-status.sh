@@ -42,6 +42,8 @@ fi
 echo ""
 echo "⚙️  Protection Settings:"
 source /etc/vps-protection/config 2>/dev/null
+# Ensure BLOCK_TIME has a default value to prevent division by zero
+BLOCK_TIME=${BLOCK_TIME:-1800}
 echo "   WireGuard: ${WG_RATE_LIMIT:-200} packets/sec"
 echo "   TeamSpeak: ${TS_RATE_LIMIT:-50} packets/sec"
 echo "   Alert threshold: ${ALERT_THRESHOLD:-100} packets"

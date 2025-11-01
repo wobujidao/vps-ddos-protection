@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # VPS DDoS Protection Script
-# Version: 1.1.0
+# Version: 1.2.0
 # https://github.com/wobujidao/vps-ddos-protection
 
 # Пути к файлам
@@ -29,6 +29,32 @@ fi
 
 # Загружаем конфигурацию
 source "$CONFIG_FILE"
+
+# Функция проверки всех зависимостей
+check_dependencies() {
+    local missing_deps=()
+    
+    for cmd in ipset iptables ip6tables curl netstat; do
+        if ! command -v $cmd &>/dev/null; then
+            missing_deps+=("$cmd")
+        fi
+    done
+    
+    # jq опциональный - только предупреждение
+    if ! command -v jq &>/dev/null; then
+        echo "[$(date)] WARNING: jq not installed - JSON parsing may be limited" >> "$LOG_FILE"
+    fi
+    
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        echo "[$(date)] ERROR: Missing required dependencies: ${missing_deps[*]}" >> "$LOG_FILE"
+        echo "ERROR: Missing required dependencies: ${missing_deps[*]}"
+        echo "Install with: apt-get install ${missing_deps[*]}"
+        return 1
+    fi
+    
+    echo "[$(date)] All required dependencies are installed" >> "$LOG_FILE"
+    return 0
+}
 
 # Функция ротации логов
 rotate_logs() {
@@ -59,15 +85,46 @@ send_telegram() {
     fi
 }
 
-# Функция получения информации об IP с таймаутом
+# Кэш для GeoIP запросов (в памяти)
+declare -A GEO_CACHE
+declare -A GEO_CACHE_TIME
+GEO_CACHE_TTL=${GEO_CACHE_TTL:-3600}  # Кэш на 1 час по умолчанию
+GEO_REQUEST_INTERVAL=${GEO_REQUEST_INTERVAL:-2}  # Минимум 2 секунды между запросами
+LAST_GEO_REQUEST=0
+
+# Функция получения информации об IP с кэшированием и rate limiting
 get_ip_info() {
     local ip="$1"
-    local info=$(curl -s "http://ipinfo.io/${ip}/json" --connect-timeout 3 --max-time 5 2>/dev/null)
-    if [[ -z "$info" ]]; then
-        echo '{"country":"Unknown","org":"Unknown"}'
-    else
-        echo "$info"
+    local current_time=$(date +%s)
+    
+    # Проверяем кэш
+    if [[ -n "${GEO_CACHE[$ip]}" ]]; then
+        local cache_age=$((current_time - GEO_CACHE_TIME[$ip]))
+        if [[ $cache_age -lt $GEO_CACHE_TTL ]]; then
+            echo "${GEO_CACHE[$ip]}"
+            return 0
+        fi
     fi
+    
+    # Rate limiting - не чаще раза в N секунд
+    local time_since_last=$((current_time - LAST_GEO_REQUEST))
+    if [[ $time_since_last -lt $GEO_REQUEST_INTERVAL ]]; then
+        sleep $((GEO_REQUEST_INTERVAL - time_since_last))
+    fi
+    
+    # Запрашиваем информацию
+    local info=$(curl -s "http://ipinfo.io/${ip}/json" --connect-timeout 3 --max-time 5 2>/dev/null)
+    LAST_GEO_REQUEST=$(date +%s)
+    
+    if [[ -z "$info" ]] || echo "$info" | grep -q "error"; then
+        info='{"country":"Unknown","org":"Unknown"}'
+    fi
+    
+    # Сохраняем в кэш
+    GEO_CACHE[$ip]="$info"
+    GEO_CACHE_TIME[$ip]=$current_time
+    
+    echo "$info"
 }
 
 # Функция создания белого списка
@@ -140,6 +197,12 @@ analyze_attackers() {
 start_protection() {
     echo "[$(date)] Starting protection..." >> "$LOG_FILE"
     
+    # Проверяем зависимости
+    if ! check_dependencies; then
+        echo "ERROR: Cannot start - missing dependencies"
+        exit 1
+    fi
+    
     # Проверяем ipset
     if ! check_ipset; then
         echo "ERROR: ipset is required but not installed"
@@ -149,17 +212,25 @@ start_protection() {
     # Ротация логов при старте
     rotate_logs
     
-    # Ждём доступности сети
+    # Ждём доступности сети (настраиваемо через конфиг)
+    NETWORK_TIMEOUT=${NETWORK_TIMEOUT:-60}  # По умолчанию 60 секунд
+    NETWORK_CHECK_INTERVAL=${NETWORK_CHECK_INTERVAL:-5}  # Проверка каждые 5 сек
     local network_attempts=0
+    local max_attempts=$((NETWORK_TIMEOUT / NETWORK_CHECK_INTERVAL))
+    
     while ! ping -c 1 -W 1 8.8.8.8 > /dev/null 2>&1; do
-        echo "[$(date)] Waiting for network..." >> "$LOG_FILE"
-        sleep 5
+        echo "[$(date)] Waiting for network... (attempt $((network_attempts + 1))/$max_attempts)" >> "$LOG_FILE"
+        sleep $NETWORK_CHECK_INTERVAL
         network_attempts=$((network_attempts + 1))
-        if [[ $network_attempts -gt 12 ]]; then
-            echo "[$(date)] Network timeout, continuing anyway..." >> "$LOG_FILE"
+        if [[ $network_attempts -ge $max_attempts ]]; then
+            echo "[$(date)] Network timeout after ${NETWORK_TIMEOUT}s, continuing anyway..." >> "$LOG_FILE"
             break
         fi
     done
+    
+    if [[ $network_attempts -gt 0 ]]; then
+        echo "[$(date)] Network is now available (took $((network_attempts * NETWORK_CHECK_INTERVAL))s)" >> "$LOG_FILE"
+    fi
     
     # Создаём ipset для чёрных списков
     ipset create -exist blacklist4 hash:ip family inet timeout $BLOCK_TIME 2>/dev/null

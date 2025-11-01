@@ -19,6 +19,13 @@ ALERT_THRESHOLD=100
 # Cooldown between alerts (seconds)
 ALERT_COOLDOWN=300
 
+# === NETWORK SETTINGS ===
+# Network availability timeout on startup (seconds)
+NETWORK_TIMEOUT=60
+
+# Interval between network checks (seconds)
+NETWORK_CHECK_INTERVAL=5
+
 # === TELEGRAM NOTIFICATIONS ===
 # Enable Telegram notifications (true/false)
 ENABLE_TELEGRAM=false
@@ -32,6 +39,12 @@ TELEGRAM_CHAT_ID="YOUR_CHAT_ID_HERE"
 # === ADVANCED SETTINGS ===
 # Enable GeoIP lookups (true/false)
 ENABLE_GEO=true
+
+# GeoIP cache TTL in seconds (3600 = 1 hour)
+GEO_CACHE_TTL=3600
+
+# Minimum interval between GeoIP requests (seconds)
+GEO_REQUEST_INTERVAL=2
 
 # Whitelist IPs (space-separated)
 WHITELIST_IPS=""

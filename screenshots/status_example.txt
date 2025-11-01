@@ -1,0 +1,26 @@
+[H[2J[3J╔══════════════════════════════════════════════════════╗
+║          DDoS Protection Status Monitor              ║
+╚══════════════════════════════════════════════════════╝
+
+🛡️  Service: active
+⏱️  Uptime:       40:42
+
+📊 Blocked Packets:
+   WireGuard: 45,602 packets
+   TeamSpeak: 0 packets
+
+🚫 Blacklisted:
+   IPv4: 1 IPs
+   IPv6: 1 IPs
+
+👥 Active Connections:
+   WireGuard: 10 clients
+   TeamSpeak: 1 server running
+
+⚙️  Protection Settings:
+   WireGuard: 200 packets/sec
+   TeamSpeak: 50 packets/sec
+   Alert threshold: 100 packets
+   Block duration: 30 minutes
+
+═══════════════════════════════════════════════════════

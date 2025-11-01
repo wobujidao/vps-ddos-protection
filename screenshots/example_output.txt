@@ -1,0 +1,33 @@
+=== Example Status Output ===
+[H[2J[3J╔══════════════════════════════════════════════════════╗
+║          DDoS Protection Status Monitor              ║
+╚══════════════════════════════════════════════════════╝
+
+🛡️  Service: active
+⏱️  Uptime:       40:42
+
+📊 Blocked Packets:
+   WireGuard: 45,602 packets
+   TeamSpeak: 0 packets
+
+🚫 Blacklisted:
+   IPv4: 1 IPs
+   IPv6: 1 IPs
+
+👥 Active Connections:
+   WireGuard: 10 clients
+   TeamSpeak: 1 server running
+
+⚙️  Protection Settings:
+   WireGuard: 200 packets/sec
+   TeamSpeak: 50 packets/sec
+   Alert threshold: 100 packets
+   Block duration: 30 minutes
+
+═══════════════════════════════════════════════════════
+
+=== Protection Rules ===
+45602 9119K DROP       17   --  *      *       0.0.0.0/0            0.0.0.0/0            udp dpt:51820 recent: UPDATE seconds: 1 hit_count: 200 name: wg side: source mask: 255.255.255.255
+ 200K   47M            17   --  *      *       0.0.0.0/0            0.0.0.0/0            udp dpt:51820 recent: SET name: wg side: source mask: 255.255.255.255
+    0     0 DROP       17   --  *      *       0.0.0.0/0            0.0.0.0/0            udp dpt:51820 match-set blacklist4 src
+    0     0 DROP       17   --  *      *       0.0.0.0/0            0.0.0.0/0            udp dpt:9987 recent: UPDATE seconds: 1 hit_count: 50 name: ts3 side: source mask: 255.255.255.255
